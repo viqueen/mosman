@@ -24,24 +24,22 @@ import static com.squareup.javapoet.TypeSpec.classBuilder;
 import static java.lang.String.format;
 
 @SupportedSourceVersion(SourceVersion.RELEASE_8)
-@SupportedAnnotationTypes("mosman.annotations.Data")
+@SupportedAnnotationTypes("mosman.annotations.Builder")
 @AutoService(Processor.class)
-public class DataAnnotationProcessor extends AbstractMosmanAnnotationProcessor {
+public class BuilderAnnotationProcessor extends AbstractMosmanAnnotationProcessor {
 
     @Override
-    protected final void processType(final Element element, Filer filer) throws IOException {
-        String className = format("%sImpl", element.getSimpleName());
+    protected final void processType(final Element element, final Filer filer) throws IOException {
+        String className = format("%sBuilder", element.getSimpleName());
+
+        TypeSpec.Builder dataClass = classBuilder(className)
+                .addModifiers(Modifier.PUBLIC, Modifier.FINAL);
+
         PackageElement packageElement = processingEnv.getElementUtils().getPackageOf(element);
         String packageName = packageElement.toString();
 
-        ClassName builderClazz = ClassName.get(packageName, format("%sBuilder", element.getSimpleName()));
-
-        TypeSpec.Builder dataClass = classBuilder(className)
-                .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
-                .addSuperinterface(TypeName.get(element.asType()));
-
         MethodSpec.Builder constructor = constructorBuilder().addModifiers(Modifier.PROTECTED);
-        constructor.addParameter(builderClazz, "builder");
+        dataClass.addMethod(constructor.build());
 
         element.getEnclosedElements()
                 .stream()
@@ -52,26 +50,31 @@ public class DataAnnotationProcessor extends AbstractMosmanAnnotationProcessor {
                     TypeName typeName = TypeName.get(item.getReturnType());
                     String name = item.getSimpleName().toString();
 
-                    dataClass.addField(typeName, name, Modifier.PRIVATE, Modifier.FINAL);
+                    dataClass.addField(typeName, name, Modifier.PRIVATE);
 
-                    constructor.addStatement(format("this.%s = builder.%s()", name, name));
+                    dataClass.addMethod(
+                            methodBuilder(format("_%s", item.getSimpleName().toString()))
+                                    .returns(ClassName.get(packageName, className))
+                                    .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
+                                    .addParameter(typeName, name)
+                                    .addStatement(format("this.%s = %s", name, name))
+                                    .addStatement("return this")
+                                    .build()
+                    );
 
                     dataClass.addMethod(
                             methodBuilder(item.getSimpleName().toString())
-                                    .addAnnotation(Override.class)
                                     .returns(typeName)
-                                    .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
+                                    .addModifiers(Modifier.PROTECTED, Modifier.FINAL)
                                     .addStatement(format("return this.%s", name))
                                     .build()
                     );
                 });
 
-        dataClass.addMethod(constructor.build());
         dataClass.addMethod(
-                methodBuilder("builder")
-                        .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
-                        .returns(builderClazz)
-                        .addStatement(format("return new %sBuilder()", element.getSimpleName()))
+                methodBuilder("build")
+                        .returns(ClassName.get(packageName, element.getSimpleName().toString()))
+                        .addStatement(format("return new %sImpl(this)", element.getSimpleName()))
                         .build()
         );
 
